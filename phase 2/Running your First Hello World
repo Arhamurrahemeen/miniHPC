@@ -1,0 +1,242 @@
+# Running your First Hello World !
+
+This document will guide you how to use Open MPI to run your first parallel processed code. 
+
+**Note:** Install the required dependencies inside WSL Ubuntu first. 
+
+---
+
+## Latop Configs
+
+Laptop A:
+- Username : GuyThatDoesEveryThin
+- IP: 192.168.1.10
+- Windows: 10
+
+Laptop B:
+- Username : Arham
+- IP: 192.168.1.2
+- Windows: 11 
+---
+
+## Path 
+
+Open MPI requires to have both files in Identical Path.
+
+We are using PowerShell to logged into WSL enviroment. 
+This will loged you into: 
+```bash
+mpiuser@DESKTOP-RRCLJSQ:/mnt/c/Users/Arham$ 
+```
+
+### Why Both Need the File
+MPI works by launching the same script on multiple machines. When you run:
+```bash
+mpirun --hostfile hosts -np 8 python3 mpi_hello.py
+```
+MPI spawns processes on Laptop A (ranks 0-3) and Laptop B (ranks 4-7). Each machine runs its own copy of ```python3 mpi_hello.py```.
+
+If Laptop B doesn't have the file, its ranks will crash with:
+```plain
+python3: can't open file '/home/username/mpi_hello.py': [Errno 2] No such file or directory
+```
+### Solution: Keep Paths Identical
+The cleanest approach is to use the same path on both machines:
+
+```bash# Go to your native WSL home directory
+cd ~
+
+# Check where you are
+pwd
+# Should show: /home/GuyThatDoesEveryThin
+
+# Create your project folder here
+mkdir -p ~/minihpc
+cd ~/minihpc
+```
+
+### Hello World!
+Create file ```mpi_hello.py``` inside ```minihpc``` folder.
+```bash
+nano mpi_hello.py
+```
+Paste this: 
+```bash
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+name = MPI.Get_processor_name()
+
+print(f"Hello from rank {rank} of {size} on {name}")
+```
+
+Save: ```Ctrl+O```, ```Enter```, ```Ctrl+X```
+
+
+### Execute 
+Run the above code on single machine 
+```bash
+mpirun -np 2 python3 mpi_hello.py
+```
+
+Expected Output:
+```bash
+Hello from rank 0 of 4 on DESKTOP-XXX
+Hello from rank 1 of 4 on DESKTOP-XXX
+```
+If get any error, Debug using below guide/
+
+----
+
+## Errors & Debugging
+
+### Verification 
+Verify Version of Dependencies. Make sure both device have similar version dependencies installed.
+
+#### Python3
+Recommended Python Version ```3.12```.
+Versrion later ```3.14``` will not work.
+```bash
+python3 --version
+```
+
+#### Open_MPI
+Recommened Version ```4.16```.
+```bash
+mpirun --version
+```
+
+### Version Confilit
+Sometimes you can fallback to previous version.
+Use ```miniconda``` to setup ```virtual``` enviroment and ```Verison``` control.
+
+Miniconda Installation:
+```bash
+# Download miniconda
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+# Install
+bash Miniconda3-latest-Linux-x86_64.sh -b -p ~/miniconda3
+
+# Init
+~/miniconda3/bin/conda init bash
+source ~/.bashrc
+
+# Create environment
+conda create -n minihpc python=3.12 openmpi=4.1.6 mpi4py numpy matplotlib -c conda-forge -y
+
+# Activate and test
+conda activate minihpc
+python -c "from mpi4py import MPI; print('SUCCESS! MPI version:', MPI.Get_version())"
+```
+
+#### Create Your Hello World File
+Inside the conda env:
+```bash
+conda activate minihpc
+mkdir -p ~/minihpc
+cd ~/minihpc
+
+cat > mpi_hello.py << 'EOF'
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+name = MPI.Get_processor_name()
+
+print(f"Hello from rank {rank} of {size} on {name}")
+EOF
+```
+
+#### Test
+
+```bash
+mpirun -np 1 python mpi_hello.py
+````
+
+
+## MPI Run on All Nodes
+Follow this to execute code using all shared resources of connected nodes.
+
+### WSL IP 
+WSL have virtual dynamic IP, changes on every boot. 
+
+Use the two methods to solve this:
+
+**1. Fix Laptop B (The Windows 11 Node)**
+
+Enable ```Mirrored Networking``` so that its ```WSL``` instance uses the ```192.168.1.2``` address directly.
+
+In Windows, open Notepad and create a file at ```%USERPROFILE%\.wslconfig.```
+
+Add the following configuration:
+
+```Ini, TOML
+[wsl2]
+networkingMode=mirrored
+```
+Restart WSL by running in PowerShell.
+```bash
+wsl --shutdown 
+```
+
+**2. Fix Laptop A (The Windows 10 Node)**
+
+Since Windows 10 lacks ```mirrored networking```, you must forward traffic from its ```Windows IP``` (192.168.1.10) to its ```WSL``` ```internal IP``` (172.18.236.134).
+
+Open PowerShell as Administrator on Laptop A and run:
+
+```PowerShell
+netsh interface portproxy add v4tov4 listenport=22 listenaddress=0.0.0.0 connectport=22 connectaddress=172.18.239.194
+```
+Note: You have run this command every rebot with dynamic wsl ip.
+
+Clear old ```netsh```:
+
+```PowerShell
+netsh interface portproxy reset
+```
+
+### Host File
+Setup Host File on both devices inside project folder ```minihpc```.
+
+```bash
+sudo nano hosts
+```
+
+#### Setting up the Host File (on Laptop A):
+
+- **Laptop A**
+
+**Option A : The "Localhost" Trick (Easiest)**
+
+This is the most stable setup because it doesn't care what your Laptop A WSL IP is.
+
+```Plaintext
+127.0.0.1 slots=2
+192.168.1.2 slots=1
+```
+
+- ```127.0.0.1:``` MPI will always find the local i5 cores, regardless of the dynamic IP.
+
+- ```192.168.1.2:``` This is the stable LAN IP for Laptop B (thanks to Mirrored mode
+
+**Option B: Using the Dynamic IP (Requires constant updates)**
+
+If you prefer to use the actual IP (e.g., ```172.18.236.134```), you must edit this file every time you reboot ```Laptop A```.
+
+```Plaintext
+172.18.236.134 slots=2
+192.168.1.2 slots=1
+```
+
+- **Laptop B**
+
+Just remember that the ```IPs``` would flip: on Laptop B, Laptop A would be ```192.168.1.10``` and Laptop B would be ```127.0.0.1```.
+```Plaintext
+192.168.1.2 slots=1
+127.0.0.1 slots=2
+```
